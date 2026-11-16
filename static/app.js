@@ -252,7 +252,10 @@
     try { await fn(); toast(msg); await refresh(); renderCustList(); } catch (e) { $("custErr").textContent = e.message; }
   }
   $("btnCust").addEventListener("click", () => { state.selCust = null; cfields.forEach((f) => { $(f).value = ""; }); $("custErr").textContent = ""; renderCustList(); openDlg($("custDlg")); });
-  $("cAdd").addEventListener("click", () => custDo(async () => { const r = await api("POST", "/api/customers", custBody()); state.selCust = r.id; }, "Customer added"));
+  $("cAdd").addEventListener("click", () => custDo(async () => {
+    await api("POST", "/api/customers", custBody());
+    state.selCust = null; cfields.forEach((f) => { $(f).value = ""; }); $("c_name").focus();   // ready for the next customer
+  }, "Customer added"));
   $("cUpd").addEventListener("click", () => custDo(() => api("PUT", "/api/customers/" + state.selCust, custBody()), "Customer updated"));
   $("cDel").addEventListener("click", () => { const c = state.customers.find((x) => x.id === state.selCust); if (c && confirm("Delete customer " + c.name + "?")) custDo(async () => { await api("DELETE", "/api/customers/" + c.id); state.selCust = null; cfields.forEach((f) => { $(f).value = ""; }); }, "Customer deleted"); });
   $("cClr").addEventListener("click", () => { state.selCust = null; cfields.forEach((f) => { $(f).value = ""; }); renderCustList(); });
@@ -282,11 +285,17 @@
   }
   $("btnProd").addEventListener("click", () => { clearProd(); state.selCat = null; $("k_name").value = ""; $("prodErr").textContent = $("catErr").textContent = ""; showTab(true); renderProd(); openDlg($("prodDlg")); });
   $("p_filter").addEventListener("change", renderProd);
-  $("pAdd").addEventListener("click", () => prodDo(async () => { const r = await api("POST", "/api/products", prodBody()); state.selProd = r.id; }, "Product added", "prodErr"));
+  $("pAdd").addEventListener("click", () => prodDo(async () => {
+    await api("POST", "/api/products", prodBody());
+    clearProd(); $("p_name").focus();   // ready for the next product
+  }, "Product added", "prodErr"));
   $("pUpd").addEventListener("click", () => prodDo(() => api("PUT", "/api/products/" + state.selProd, prodBody()), "Product updated", "prodErr"));
   $("pDel").addEventListener("click", () => { if (confirm("Delete this product? Old orders keep their item names and prices.")) prodDo(async () => { await api("DELETE", "/api/products/" + state.selProd); clearProd(); }, "Product deleted", "prodErr"); });
   $("pClr").addEventListener("click", () => { clearProd(); renderProd(); });
-  $("kAdd").addEventListener("click", () => prodDo(async () => { const r = await api("POST", "/api/categories", { name: $("k_name").value }); state.selCat = r.id; }, "Category added", "catErr"));
+  $("kAdd").addEventListener("click", () => prodDo(async () => {
+    await api("POST", "/api/categories", { name: $("k_name").value });
+    state.selCat = null; $("k_name").value = ""; $("k_name").focus();   // ready for the next category
+  }, "Category added", "catErr"));
   $("kUpd").addEventListener("click", () => prodDo(() => api("PUT", "/api/categories/" + state.selCat, { name: $("k_name").value }), "Category updated", "catErr"));
   $("kDel").addEventListener("click", () => { if (confirm("Delete this category? Its products stay, with no category.")) prodDo(async () => { await api("DELETE", "/api/categories/" + state.selCat); state.selCat = null; $("k_name").value = ""; }, "Category deleted", "catErr"); });
   $("kClr").addEventListener("click", () => { state.selCat = null; $("k_name").value = ""; renderProd(); });
