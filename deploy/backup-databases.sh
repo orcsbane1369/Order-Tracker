@@ -2,7 +2,7 @@
 # Nightly backup of the databases for Work Hours, Bills Tracker and Order Tracker.
 #
 # Copies a clean snapshot of each app's SQLite database into a folder in your backups share:
-#   /mnt/user/unraid_backups/app-databases/<app>/<app>-YYYY-MM-DD-HHMM.db
+#   /mnt/user/Unraid_Backups/app-databases/<app>/<app>-YYYY-MM-DD-HHMM.db
 # The snapshot is taken from inside the running container with SQLite's own backup call, so it is safe while the app is
 # in use (a plain file copy of a database that is being written to can be damaged). Each snapshot is checked after it
 # is taken, and snapshots older than KEEP_DAYS days are removed.
@@ -10,12 +10,12 @@
 # Run it from Unraid's User Scripts plugin (Settings > User Scripts), custom schedule  0 3 * * *  (3 AM every night).
 # Change the three settings below if your share, retention or container names differ.
 
-SHARE="${SHARE:-/mnt/user/unraid_backups}"      # must already exist (this script will not create a new share)
+SHARE="${SHARE:-/mnt/user/Unraid_Backups}"      # must already exist (this script will not create a new share). Capitals matter.
 DEST="${DEST:-$SHARE/app-databases}"
 KEEP_DAYS="${KEEP_DAYS:-90}"
 
-# name : container : database file inside the container's /data folder
-APPS="workhours:workhours:workhours.db billstracker:billstracker:bills.db ordertracker:ordertracker:orders.db"
+# folder name : container name (as shown in the Docker tab) : database file inside the container's /data folder
+APPS="workhours:workhours:workhours.db billstracker:bills-tracker:bills.db ordertracker:ordertracker:orders.db"
 
 STAMP=$(date +%Y-%m-%d-%H%M)
 failed=0

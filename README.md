@@ -65,7 +65,7 @@ counted against stock, so enter each product's real count once under **Products*
 
 ## Backing up the databases (all three apps)
 `deploy/backup-databases.sh` takes a safe snapshot of the Work Hours, Bills Tracker and Order Tracker databases into
-`/mnt/user/unraid_backups/app-databases/<app>/` (one folder per app, files named like `ordertracker-2026-11-15-0300.db`), checks
+`/mnt/user/Unraid_Backups/app-databases/<app>/` (one folder per app, files named like `ordertracker-2026-11-15-0300.db`), checks
 each snapshot, and deletes snapshots older than 90 days. It uses SQLite's own backup call from inside each running container, so
 it is safe while the apps are in use. A failed or skipped app makes the script report a problem, so one bad app never hides the others.
 
@@ -74,8 +74,8 @@ Set it up once with the **User Scripts** plugin (Settings > User Scripts; instal
 2. Set the schedule to **Custom** with `0 3 * * *` (3 AM every night) and Apply.
 3. Click **Run Script** once and check the log says `All backups done.` and files appear in the `app-databases` folder.
 
-It expects the containers to be named `workhours`, `billstracker` and `ordertracker` and the share to be `unraid_backups`; a
-different name shows up as `SKIPPED` or an error in the log, and the settings are at the top of the script (`SHARE`, `KEEP_DAYS`, `APPS`).
+It is set up for the containers `workhours`, `bills-tracker` and `ordertracker` and the share `Unraid_Backups` (capitals matter), as
+checked on the server. A different name shows up as `SKIPPED` or an error in the log, and the settings are at the top of the script (`SHARE`, `KEEP_DAYS`, `APPS`).
 
 To restore: stop the container, copy the snapshot you want over the app's database file in `/mnt/user/appdata/<app>/`
 (`orders.db`, `bills.db` or `workhours.db`) keeping the same owner (`chown 99:100`), then start the container. Try one restore
