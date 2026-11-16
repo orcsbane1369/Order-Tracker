@@ -81,6 +81,11 @@ To restore: stop the container, copy the snapshot you want over the app's databa
 (`orders.db`, `bills.db` or `workhours.db`) keeping the same owner (`chown 99:100`), then start the container. Try one restore
 on a spare copy now and then, so you know it works before you need it.
 
+## Folder icon for the Unraid Docker tab
+`deploy/unraid-folder-icon.png` (and `.svg`) is an icon for a Docker-tab folder holding the three apps. In Unraid, edit the folder and
+set its icon to this URL (or upload the PNG):
+`https://raw.githubusercontent.com/orcsbane1369/Order-Tracker/main/deploy/unraid-folder-icon.png`
+
 ## Tests
     python test_app.py          # customers, products, orders and items, stages, filters, stats, quotes, email, deletes
     python test_inventory.py    # stock in/out, cancel/edit/delete, restock log, low-stock alerts, upgrading an older database
