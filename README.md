@@ -11,6 +11,7 @@ forward its port on your router or put it behind a public tunnel.**
   details), set the date, stage, payment method and amount paid, then add items. Each item is a product (price fills in
   automatically, you can change it) or a **Custom item**, plus customization notes and a quantity. The total, amount paid
   and balance due update as you type.
+- **Save & Add Another** (new orders only) saves the order and gives you a blank New Order window straight away, handy for entering several in a row. After **Add New** in Customers, Products and Categories the form also clears for the next entry.
 - **Edit Order** (or double-click a row) opens the same window, so more items can be added later.
 - **Move to** changes the stage of the selected order. Moving to Completed stamps the completion date.
 - **Email Quote** sends the customer an email with the order's items and total. **Print Quote** opens a clean printable page.

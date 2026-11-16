@@ -199,11 +199,13 @@
       $("o_cust").value = ""; $("o_date").value = todayISO(); $("o_status").value = "New"; $("o_method").value = ""; $("o_paid").value = "0";
       addItemRow();
     }
+    $("btnSaveAnother").hidden = !!id;   // only makes sense when entering new orders
     $("newCust").hidden = true; recalc(); openDlg($("orderDlg"));
     if (!id) $("o_cust").focus();
   }
-  $("orderForm").addEventListener("submit", async (e) => {
-    e.preventDefault(); $("orderErr").textContent = "";
+  async function saveOrder(another) {
+    $("orderErr").textContent = "";
+    if (!$("orderForm").reportValidity()) return;
     const body = {
       order_date: $("o_date").value, status: $("o_status").value, payment_method: $("o_method").value,
       amount_paid: $("o_paid").value || "0", notes: $("o_notes").value,
@@ -214,12 +216,17 @@
     if ($("o_cust").value === "__new") body.new_customer = { name: $("nc_name").value, phone: $("nc_phone").value, email: $("nc_email").value, address: $("nc_addr").value };
     else body.customer_id = $("o_cust").value;
     if (!body.customer_id && !body.new_customer) { $("orderErr").textContent = "Pick a customer or choose + New customer."; return; }
+    $("btnSave").disabled = $("btnSaveAnother").disabled = true;   // no double-clicking into two orders
     try {
       const r = state.editing ? await api("PUT", "/api/orders/" + state.editing, body) : await api("POST", "/api/orders", body);
-      state.sel = state.editing || r.id; $("orderDlg").close(); toast("Order #" + state.sel + " saved");
+      state.sel = state.editing || r.id; toast("Order #" + state.sel + " saved");
       await refresh();
+      if (another) await openOrder(null); else $("orderDlg").close();   // a blank order, ready for the next one
     } catch (err) { $("orderErr").textContent = err.message; }
-  });
+    $("btnSave").disabled = $("btnSaveAnother").disabled = false;
+  }
+  $("orderForm").addEventListener("submit", (e) => { e.preventDefault(); saveOrder(false); });
+  $("btnSaveAnother").addEventListener("click", () => saveOrder(true));
 
   // ---------- email quote
   $("btnEmail").addEventListener("click", () => {
