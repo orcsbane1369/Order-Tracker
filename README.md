@@ -63,6 +63,24 @@ Back up by copying `/mnt/user/appdata/ordertracker/orders.db`.
 Upgrading an older install keeps all its data. Products start with 0 in stock, and orders entered before the update are not
 counted against stock, so enter each product's real count once under **Products** after updating.
 
+## Backing up the databases (all three apps)
+`deploy/backup-databases.sh` takes a safe snapshot of the Work Hours, Bills Tracker and Order Tracker databases into
+`/mnt/user/unraid_backups/app-databases/<app>/` (one folder per app, files named like `ordertracker-2026-11-15-0300.db`), checks
+each snapshot, and deletes snapshots older than 90 days. It uses SQLite's own backup call from inside each running container, so
+it is safe while the apps are in use. A failed or skipped app makes the script report a problem, so one bad app never hides the others.
+
+Set it up once with the **User Scripts** plugin (Settings > User Scripts; install it from Community Applications if needed):
+1. **Add New Script**, name it `backup-app-databases`, click the gear > **Edit Script**, and paste in the contents of `deploy/backup-databases.sh`.
+2. Set the schedule to **Custom** with `0 3 * * *` (3 AM every night) and Apply.
+3. Click **Run Script** once and check the log says `All backups done.` and files appear in the `app-databases` folder.
+
+It expects the containers to be named `workhours`, `billstracker` and `ordertracker` and the share to be `unraid_backups`; a
+different name shows up as `SKIPPED` or an error in the log, and the settings are at the top of the script (`SHARE`, `KEEP_DAYS`, `APPS`).
+
+To restore: stop the container, copy the snapshot you want over the app's database file in `/mnt/user/appdata/<app>/`
+(`orders.db`, `bills.db` or `workhours.db`) keeping the same owner (`chown 99:100`), then start the container. Try one restore
+on a spare copy now and then, so you know it works before you need it.
+
 ## Tests
     python test_app.py          # customers, products, orders and items, stages, filters, stats, quotes, email, deletes
     python test_inventory.py    # stock in/out, cancel/edit/delete, restock log, low-stock alerts, upgrading an older database
