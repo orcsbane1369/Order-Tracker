@@ -15,6 +15,16 @@ forward its port on your router or put it behind a public tunnel.**
 - **Edit Order** (or double-click a row) opens the same window, so more items can be added later.
 - **Move to** changes the stage of the selected order. Moving to Completed stamps the completion date.
 - **Email Quote** sends the customer an email with the order's items and total. **Print Quote** opens a clean printable page.
+- **Inventory:** each product has a **Current inventory** number. Stock comes off **when an order is entered**, so you can see
+  what is really available when the next order comes in. It goes back if the order is cancelled or deleted, and only the
+  difference moves if you edit the quantities. Changing stages (Pending, Shipped, Completed...) never touches stock, and Custom
+  items with no product do not use any. In the order window each item row shows how many are on hand and how many will be left;
+  if you are short it warns you in red but still lets you save (the stock then shows as short by that many).
+  **Add Stock** (in Products) records a restock or correction, and **Stock History** lists every change: starting stock, orders
+  entered/edited/cancelled/deleted, restocks and corrections.
+- **Settings > Low-stock alerts:** set a number per product (pens at 25, shirts at 5...). At or below it, the product appears in a red
+  box on the main screen and you get **one email** (to the address that sends your quotes). You get another email only after it has been
+  restocked above its number and drops again. If email is not set up the red box still works.
 - **Customers**, **Products** (with Categories) and **Order Stats** (per customer: orders, open, completed, ordered, paid,
   balance due) are the other windows from the old program.
 - The order list **scrolls inside its own box**, with sort-by-column and filters for order #, customer, stage and dates.
@@ -50,5 +60,9 @@ Add it in the Docker tab with **Add Container**:
 (Or use `docker-compose.yml` with Compose Manager.) To update after a push: Docker tab > **Check for Updates** > **apply update**.
 Back up by copying `/mnt/user/appdata/ordertracker/orders.db`.
 
+Upgrading an older install keeps all its data. Products start with 0 in stock, and orders entered before the update are not
+counted against stock, so enter each product's real count once under **Products** after updating.
+
 ## Tests
-    python test_app.py    # customers, products, orders and items, stages, filters, stats, quotes, email, deletes
+    python test_app.py          # customers, products, orders and items, stages, filters, stats, quotes, email, deletes
+    python test_inventory.py    # stock in/out, cancel/edit/delete, restock log, low-stock alerts, upgrading an older database

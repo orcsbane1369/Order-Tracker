@@ -6,6 +6,7 @@
 
 <main class="page">
   <section class="cards" id="cards" aria-label="Orders by stage"></section>
+  <section class="panel lowbanner" id="lowBanner" role="status" hidden></section>
 
   <section class="toolbar">
     <div class="group">
@@ -20,6 +21,7 @@
       <button id="btnCust">Customers</button>
       <button id="btnProd">Products</button>
       <button id="btnStats">Order Stats</button>
+      <button id="btnSettings">Settings</button>
     </div>
   </section>
 
@@ -80,10 +82,11 @@
         <legend>Items</legend>
         <div class="scroll items">
           <table class="mini" id="itemTable">
-            <thead><tr><th>Product</th><th>Customization / notes</th><th class="n">Qty</th><th class="n">Unit price</th><th class="n">Total</th><th></th></tr></thead>
+            <thead><tr><th>Product</th><th>Customization / notes</th><th class="n">Qty</th><th class="n">Unit price</th><th>Stock</th><th class="n">Total</th><th></th></tr></thead>
             <tbody id="itemBody"></tbody>
           </table>
         </div>
+        <p id="stockWarn" class="warn" role="alert" hidden></p>
         <div class="itemfoot">
           <button type="button" id="btnAddItem">+ Add Item</button>
           <div class="totals">
@@ -130,10 +133,13 @@
       <label>Category <select id="p_cat"></select></label>
       <label class="span2">Description <textarea id="p_desc" rows="2" maxlength="500" placeholder="Generic description (e.g., Stainless steel, double-walled)"></textarea></label>
       <label>Unit price ($) <input id="p_price" type="number" step="0.01" min="0" placeholder="0.00"></label>
+      <label>Current inventory <input id="p_stock" type="number" step="1" placeholder="0"></label>
     </div>
     <div class="group">
       <button id="pAdd" class="primary">Add New</button><button id="pUpd" disabled>Update Selected</button>
       <button id="pDel" class="danger" disabled>Delete Selected</button><button id="pClr">Clear Fields</button>
+      <span class="sep"></span>
+      <button id="pStock" disabled>Add Stock</button><button id="pHist" disabled>Stock History</button>
     </div>
     <span id="prodErr" class="error" role="alert"></span>
   </div>
@@ -163,6 +169,47 @@
     <p class="muted small">Cancelled orders are not counted in the dollar amounts. Open means New, Pending, Ready for Pickup or Shipped.</p>
   </div>
   <div class="dlg-foot"><button data-close>Close</button></div>
+</dialog>
+
+<!-- Add stock -->
+<dialog id="stockDlg" aria-labelledby="stockTitle">
+  <form id="stockForm" method="dialog">
+    <div class="dlg-head"><h2 id="stockTitle">Add Stock</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+    <div class="dlg-body col">
+      <p id="stockInfo" class="muted"></p>
+      <label>Quantity to add <input id="s_qty" type="number" step="1" required placeholder="e.g. 24 (use a minus sign to take stock out)"></label>
+      <label>Note (optional) <input id="s_note" maxlength="200" placeholder="e.g. Amazon order, recount" autocomplete="off"></label>
+    </div>
+    <div class="dlg-foot"><span id="stockErr" class="error" role="alert"></span><button type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
+  </form>
+</dialog>
+
+<!-- Stock history -->
+<dialog id="histDlg" class="wide" aria-labelledby="histTitle">
+  <div class="dlg-head"><h2 id="histTitle">Stock History</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+  <div class="dlg-body">
+    <p id="histInfo" class="muted"></p>
+    <div class="scroll tall">
+      <table class="mini"><thead><tr><th>When</th><th class="n">Change</th><th class="n">Stock after</th><th>Reason</th></tr></thead><tbody id="histBody"></tbody></table>
+    </div>
+  </div>
+  <div class="dlg-foot"><button data-close>Close</button></div>
+</dialog>
+
+<!-- Settings -->
+<dialog id="setDlg" class="wide" aria-labelledby="setTitle">
+  <div class="dlg-head"><h2 id="setTitle">Settings: Low-Stock Alerts</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+  <div class="dlg-body col">
+    <p class="muted">Set the number each product should warn at. When its stock reaches that number or less, it shows in a red box on the main screen and you get one email. Leave a box empty for no alert. Pens that sell fast can warn at 25 while shirts warn at 5.</p>
+    <p id="setMail" class="muted"></p>
+    <div class="scroll tall">
+      <table class="mini" id="setTable">
+        <thead><tr><th>Product</th><th>Category</th><th class="n">In stock</th><th>Alert when stock is at or below</th></tr></thead>
+        <tbody id="setBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="dlg-foot"><span id="setMsg" class="error" role="alert"></span><button id="setTest">Send Test Email</button><button data-close>Close</button><button id="setSave" class="primary">Save Alert Levels</button></div>
 </dialog>
 
 <!-- Email quote -->

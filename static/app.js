@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const state = { cfg: null, customers: [], categories: [], products: [], orders: [], stats: null,
+  const state = { editReserved: {}, cfg: null, customers: [], categories: [], products: [], orders: [], stats: null,
                   sel: null, sort: { k: "id", dir: -1 }, editing: null, selCust: null, selProd: null, selCat: null };
 
   // ---------- helpers
@@ -34,7 +34,9 @@
   };
   const slug = (s) => s.split(" ")[0];
   let toastTimer;
-  function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3200); }
+  function toast(msg, ms) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms || 3200); }
+  const shortText = (w) => w.map((x) => x.name + " (short " + x.short + ")").join(", ");
+  const withWarn = (msg, w) => (w && w.length ? [msg + ". Not enough stock: " + shortText(w), 8000] : [msg, 3200]);
   const openDlg = (d) => { if (!d.open) d.showModal(); };
   document.querySelectorAll("dialog").forEach((d) => d.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) d.close(); }));
   const setOptions = (sel, opts, value) => {
@@ -59,7 +61,15 @@
     if (!state.orders.some((o) => o.id === state.sel)) state.sel = null;
     renderTable();
   }
-  async function loadStats() { state.stats = await api("GET", "/api/stats"); renderCards(); }
+  async function loadStats() { state.stats = await api("GET", "/api/stats"); renderCards(); renderLow(); }
+  function renderLow() {
+    const box = $("lowBanner"), list = state.stats.low_stock || [];
+    box.hidden = list.length === 0; box.replaceChildren(); document.body.classList.toggle("haslow", list.length > 0);
+    if (!list.length) return;
+    const items = el("span", { class: "items" }, el("strong", { class: "low", text: "Low stock: " }));
+    list.forEach((p, i) => items.append((i ? " \u00b7 " : ""), el("span", { text: p.name + " " + (p.stock <= 0 ? (p.stock < 0 ? "short " + (-p.stock) : "out") : p.stock + " left") + " (alert at " + p.threshold + ")" })));
+    box.append(items, el("button", { type: "button", text: "Add Stock", onclick: () => { openProducts(); } }), el("button", { type: "button", class: "ghost", text: "Settings", onclick: () => openSettings() }));
+  }
   async function refresh() { await Promise.all([loadLists(), loadOrders(), loadStats()]); }
 
   // ---------- stage cards
@@ -131,7 +141,7 @@
   $("btnEdit").addEventListener("click", () => openOrder(state.sel));
   $("btnPrint").addEventListener("click", () => { window.open("/orders/" + state.sel + "/quote", "_blank", "noopener"); });
   $("selStage").addEventListener("change", async () => {
-    try { await api("POST", "/api/orders/" + state.sel + "/status", { status: $("selStage").value, completion_date: todayISO() }); toast("Order #" + state.sel + " moved to " + $("selStage").value); await Promise.all([loadOrders(), loadStats()]); }
+    try { const r = await api("POST", "/api/orders/" + state.sel + "/status", { status: $("selStage").value, completion_date: todayISO() }); toast(...withWarn("Order #" + state.sel + " moved to " + $("selStage").value, r.warnings)); await Promise.all([loadOrders(), loadStats(), loadLists()]); }
     catch (e) { toast(e.message); updateButtons(); }
   });
   $("btnDelete").addEventListener("click", async () => {
@@ -141,11 +151,26 @@
 
   // ---------- new / edit order window
   const recalc = () => {
-    let total = 0;
-    document.querySelectorAll("#itemBody tr").forEach((tr) => {
+    let total = 0; const need = {}, rows = [...document.querySelectorAll("#itemBody tr")];
+    const holds = $("o_status").value !== "Cancelled";   // a cancelled order takes nothing out of stock
+    rows.forEach((tr) => {
       const q = parseInt(tr.querySelector(".i-qty").value, 10) || 0, p = parseFloat(tr.querySelector(".i-price").value) || 0;
       const t = Math.round(q * p * 100) / 100; total += t; tr.querySelector(".i-total").textContent = usd(t);
+      const pid = tr.querySelector(".i-prod").value; if (pid && holds) need[pid] = (need[pid] || 0) + q;
     });
+    // "On hand" for this order = what is in stock now + what this same order already took out when it was saved.
+    const warn = [];
+    rows.forEach((tr) => {
+      const cell = tr.querySelector(".i-stock"), pid = tr.querySelector(".i-prod").value;
+      cell.className = "i-stock small";
+      if (!pid) { cell.textContent = "\u2014"; return; }
+      const p = state.products.find((x) => String(x.id) === pid); if (!p) { cell.textContent = "\u2014"; return; }
+      const have = p.stock + (state.editReserved[pid] || 0), n = need[pid] || 0;
+      if (!holds) cell.textContent = have + " on hand";
+      else if (n > have) { cell.textContent = have + " on hand, short " + (n - have); cell.classList.add("warn"); if (!warn.some((w) => w.name === p.name)) warn.push({ name: p.name, short: n - have }); }
+      else cell.textContent = have + " on hand, " + (have - n) + " left after";
+    });
+    $("stockWarn").hidden = warn.length === 0; $("stockWarn").textContent = warn.length ? "Not enough stock: " + shortText(warn) + ". You can still save the order." : "";
     const paid = parseFloat($("o_paid").value) || 0;
     $("t_total").textContent = usd(total); $("t_paid").textContent = usd(paid); $("t_bal").textContent = usd(total - paid);
   };
@@ -172,16 +197,20 @@
       el("td", {}, el("input", { class: "i-desc", maxlength: "1000", value: it.description, placeholder: "Color, size, name to print...", "aria-label": "Customization" })),
       el("td", {}, el("input", { class: "i-qty", type: "number", min: "1", step: "1", value: String(it.qty), "aria-label": "Quantity", oninput: recalc })),
       el("td", {}, el("input", { class: "i-price", type: "number", min: "0", step: "0.01", value: it.unit_price, "aria-label": "Unit price", oninput: recalc })),
+      el("td", { class: "i-stock small", text: "\u2014" }),
       el("td", { class: "n i-total", text: "$0.00" }),
       el("td", {}, el("button", { type: "button", class: "ghost", "aria-label": "Remove item", text: "✕", onclick: () => { tr.remove(); recalc(); } })));
     $("itemBody").append(tr); recalc(); return tr;
   }
   $("btnAddItem").addEventListener("click", () => addItemRow().querySelector(".i-prod").focus());
   $("o_paid").addEventListener("input", recalc);
+  $("o_status").addEventListener("change", recalc);
   $("o_cust").addEventListener("change", () => { $("newCust").hidden = $("o_cust").value !== "__new"; if (!$("newCust").hidden) $("nc_name").focus(); });
 
   async function openOrder(id) {
     $("orderErr").textContent = "";
+    try { await loadLists(); } catch (e) { /* keep the lists we already have */ }   // fresh stock numbers
+    state.editReserved = {};
     const cfg = state.cfg;
     setOptions($("o_status"), cfg.statuses.map((s) => [s, s]));
     setOptions($("o_method"), [["", "(none yet)"], ...cfg.payment_methods.map((m) => [m, m])]);
@@ -193,6 +222,7 @@
       $("orderTitle").textContent = "Order #" + id;
       $("o_cust").value = String(o.customer_id); $("o_date").value = o.order_date; $("o_status").value = o.status;
       $("o_method").value = o.payment_method; $("o_paid").value = o.amount_paid; $("o_notes").value = o.notes;
+      if (o.status !== "Cancelled") for (const it of o.items) if (it.product_id) state.editReserved[it.product_id] = (state.editReserved[it.product_id] || 0) + it.qty;
       o.items.forEach((it) => addItemRow(it));
     } else {
       $("orderTitle").textContent = "New Order";
@@ -219,7 +249,7 @@
     $("btnSave").disabled = $("btnSaveAnother").disabled = true;   // no double-clicking into two orders
     try {
       const r = state.editing ? await api("PUT", "/api/orders/" + state.editing, body) : await api("POST", "/api/orders", body);
-      state.sel = state.editing || r.id; toast("Order #" + state.sel + " saved");
+      state.sel = state.editing || r.id; toast(...withWarn("Order #" + state.sel + " saved", r.warnings));
       await refresh();
       if (another) await openOrder(null); else $("orderDlg").close();   // a blank order, ready for the next one
     } catch (err) { $("orderErr").textContent = err.message; }
@@ -271,26 +301,83 @@
   function showTab(p) { $("paneP").hidden = !p; $("paneC").hidden = p; $("tabP").setAttribute("aria-selected", String(p)); $("tabC").setAttribute("aria-selected", String(!p)); }
   $("tabP").addEventListener("click", () => showTab(true)); $("tabC").addEventListener("click", () => showTab(false));
   function catOptions(allLabel) { return [["", allLabel], ...state.categories.map((c) => [c.id, c.name])]; }
-  function clearProd() { state.selProd = null; ["p_name", "p_desc", "p_price"].forEach((f) => { $(f).value = ""; }); $("p_cat").value = ""; }
+  function clearProd() { state.selProd = null; ["p_name", "p_desc", "p_price", "p_stock"].forEach((f) => { $(f).value = ""; }); $("p_cat").value = ""; }
   function renderProd() {
     setOptions($("p_filter"), catOptions("-- All Categories --"), $("p_filter").value);
     setOptions($("p_cat"), catOptions("(no category)"), $("p_cat").value);
     const f = $("p_filter").value, box = $("prodList"); box.replaceChildren();
     for (const p of state.products.filter((x) => !f || String(x.category_id) === f))
-      box.append(el("button", { type: "button", role: "option", "aria-selected": String(p.id === state.selProd), text: p.name + (p.category ? " (" + p.category + ")" : "") + " (" + usd(p.unit_price) + ")",
-        onclick: () => { state.selProd = p.id; $("p_name").value = p.name; $("p_desc").value = p.description; $("p_price").value = p.unit_price; $("p_cat").value = p.category_id || ""; renderProd(); } }));
-    $("pUpd").disabled = $("pDel").disabled = state.selProd === null;
+      box.append(el("button", { type: "button", role: "option", "aria-selected": String(p.id === state.selProd), class: p.low ? "low" : false, text: p.name + (p.category ? " (" + p.category + ")" : "") + " (" + usd(p.unit_price) + ")  \u2022  " + p.stock + " in stock" + (p.low ? "  \u26a0 LOW" : ""),
+        onclick: () => { state.selProd = p.id; $("p_name").value = p.name; $("p_desc").value = p.description; $("p_price").value = p.unit_price; $("p_stock").value = p.stock; $("p_cat").value = p.category_id || ""; renderProd(); } }));
+    $("pUpd").disabled = $("pDel").disabled = $("pStock").disabled = $("pHist").disabled = state.selProd === null;
     const cbox = $("catList"); cbox.replaceChildren();
     for (const c of state.categories) cbox.append(el("button", { type: "button", role: "option", "aria-selected": String(c.id === state.selCat), text: c.name,
       onclick: () => { state.selCat = c.id; $("k_name").value = c.name; renderProd(); } }));
     $("kUpd").disabled = $("kDel").disabled = state.selCat === null;
   }
-  const prodBody = () => ({ name: $("p_name").value, description: $("p_desc").value, unit_price: $("p_price").value || "0", category_id: $("p_cat").value });
+  const prodBody = () => ({ name: $("p_name").value, description: $("p_desc").value, unit_price: $("p_price").value || "0", category_id: $("p_cat").value, stock: $("p_stock").value });
   async function prodDo(fn, msg, errId) {
     $(errId).textContent = "";
-    try { await fn(); toast(msg); await loadLists(); renderProd(); } catch (e) { $(errId).textContent = e.message; }
+    try { await fn(); toast(msg); await Promise.all([loadLists(), loadStats()]); renderProd(); } catch (e) { $(errId).textContent = e.message; }
   }
-  $("btnProd").addEventListener("click", () => { clearProd(); state.selCat = null; $("k_name").value = ""; $("prodErr").textContent = $("catErr").textContent = ""; showTab(true); renderProd(); openDlg($("prodDlg")); });
+  function openProducts() { clearProd(); state.selCat = null; $("k_name").value = ""; $("prodErr").textContent = $("catErr").textContent = ""; showTab(true); renderProd(); openDlg($("prodDlg")); }
+  $("btnProd").addEventListener("click", openProducts);
+
+  // ---------- add stock + history
+  const selProduct = () => state.products.find((p) => p.id === state.selProd);
+  $("pStock").addEventListener("click", () => {
+    const p = selProduct(); if (!p) return;
+    $("stockErr").textContent = ""; $("s_qty").value = ""; $("s_note").value = "";
+    $("stockInfo").textContent = p.name + ": " + p.stock + " in stock now."; openDlg($("stockDlg")); $("s_qty").focus();
+  });
+  $("stockForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); $("stockErr").textContent = "";
+    try {
+      const r = await api("POST", "/api/products/" + state.selProd + "/stock", { change: $("s_qty").value, note: $("s_note").value });
+      $("stockDlg").close(); toast("Stock is now " + r.stock); await Promise.all([loadLists(), loadStats()]);
+      const p = selProduct(); if (p) $("p_stock").value = p.stock; renderProd();
+    } catch (err) { $("stockErr").textContent = err.message; }
+  });
+  $("pHist").addEventListener("click", async () => {
+    try {
+      const r = await api("GET", "/api/products/" + state.selProd + "/stock-log");
+      $("histTitle").textContent = "Stock History: " + r.name; $("histInfo").textContent = r.stock + " in stock now. Newest first.";
+      const body = $("histBody"); body.replaceChildren();
+      for (const l of r.log) {
+        const when = new Date(l.when.replace(" ", "T") + "Z");
+        body.append(el("tr", {}, el("td", { text: isNaN(when) ? l.when : when.toLocaleString() }), el("td", { class: "n" + (l.change < 0 ? " neg" : ""), text: (l.change > 0 ? "+" : "") + l.change }),
+          el("td", { class: "n", text: String(l.after) }), el("td", { text: l.reason })));
+      }
+      if (!r.log.length) body.append(el("tr", {}, el("td", { colspan: "4", class: "muted", text: "No stock changes yet." })));
+      openDlg($("histDlg"));
+    } catch (e) { toast(e.message); }
+  });
+
+  // ---------- settings: low-stock levels
+  async function openSettings() {
+    let r; try { r = await api("GET", "/api/settings"); } catch (e) { toast(e.message); return; }
+    $("setMsg").textContent = "";
+    $("setMail").textContent = r.alert_to ? "Alert emails go to " + r.alert_to + " (the address that sends your quotes)." : "Email is not set up, so alerts only show on the main screen. Add the OT_SMTP_* settings to get emails.";
+    $("setTest").disabled = !r.alert_to;
+    const body = $("setBody"); body.replaceChildren();
+    for (const p of r.products) {
+      body.append(el("tr", {}, el("td", { text: p.name, class: p.low ? "low" : false }), el("td", { text: p.category }), el("td", { class: "n" + (p.low ? " low" : ""), text: String(p.stock) }),
+        el("td", {}, el("input", { type: "number", min: "0", step: "1", "data-id": p.id, value: p.low_threshold === null ? "" : String(p.low_threshold), placeholder: "no alert", "aria-label": "Alert level for " + p.name }))));
+    }
+    if (!r.products.length) body.append(el("tr", {}, el("td", { colspan: "4", class: "muted", text: "No products yet. Add some under Products." })));
+    openDlg($("setDlg"));
+  }
+  $("btnSettings").addEventListener("click", openSettings);
+  $("setSave").addEventListener("click", async () => {
+    $("setMsg").textContent = "";
+    const items = [...document.querySelectorAll("#setBody input")].map((i) => ({ id: i.dataset.id, low_threshold: i.value }));
+    try { await api("PUT", "/api/settings/thresholds", { items }); toast("Alert levels saved"); await Promise.all([loadLists(), loadStats()]); await openSettings(); }
+    catch (e) { $("setMsg").textContent = e.message; }
+  });
+  $("setTest").addEventListener("click", async () => {
+    $("setMsg").textContent = "";
+    try { const r = await api("POST", "/api/settings/test-email", {}); toast("Test email sent to " + r.to); } catch (e) { $("setMsg").textContent = e.message; }
+  });
   $("p_filter").addEventListener("change", renderProd);
   $("pAdd").addEventListener("click", () => prodDo(async () => {
     await api("POST", "/api/products", prodBody());

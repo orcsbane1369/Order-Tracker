@@ -39,7 +39,15 @@ CREATE TABLE IF NOT EXISTS categories(
 CREATE TABLE IF NOT EXISTS products(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
   unit_price_c INTEGER NOT NULL DEFAULT 0,
-  category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL);
+  category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  stock INTEGER NOT NULL DEFAULT 0,                 -- units on hand (orders that are not cancelled have already taken theirs)
+  low_threshold INTEGER,                            -- alert when stock is at or below this; empty = no alert for this product
+  low_alert_sent INTEGER NOT NULL DEFAULT 0);       -- 1 once the alert email went out; reset when stock rises above the threshold
+CREATE TABLE IF NOT EXISTS stock_log(
+  id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  change INTEGER NOT NULL, stock_after INTEGER NOT NULL, reason TEXT NOT NULL DEFAULT '',
+  order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS ix_stocklog_product ON stock_log(product_id, id);
 CREATE TABLE IF NOT EXISTS orders(
   id INTEGER PRIMARY KEY,
   customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
@@ -81,6 +89,12 @@ def init_db():
     with sqlite3.connect(DB_PATH) as c:
         c.execute("PRAGMA foreign_keys=ON")
         c.executescript(SCHEMA)
+        # Upgrade a database made before inventory existed: add the new product columns.
+        have = {r[1] for r in c.execute("PRAGMA table_info(products)")}
+        for col, ddl in (("stock", "INTEGER NOT NULL DEFAULT 0"), ("low_threshold", "INTEGER"),
+                         ("low_alert_sent", "INTEGER NOT NULL DEFAULT 0")):
+            if col not in have:
+                c.execute(f"ALTER TABLE products ADD COLUMN {col} {ddl}")
 
 
 init_db()
@@ -292,9 +306,14 @@ def categories_delete(cid):
     return jsonify(ok=True)
 
 
+def is_low(r):
+    return r["low_threshold"] is not None and r["stock"] <= r["low_threshold"]
+
+
 def prod_json(r):
     return {"id": r["id"], "name": r["name"], "description": r["description"], "unit_price": dollars(r["unit_price_c"]),
-            "category_id": r["category_id"], "category": r["category"] or ""}
+            "category_id": r["category_id"], "category": r["category"] or "", "stock": r["stock"],
+            "low_threshold": r["low_threshold"], "low": is_low(r)}
 
 
 @app.get("/api/products")
@@ -302,6 +321,20 @@ def products_list():
     rows = db().execute(
         "SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id=p.category_id ORDER BY p.name").fetchall()
     return jsonify([prod_json(r) for r in rows])
+
+
+def whole(v, what, lo=-1000000, hi=1000000, blank_ok=False):
+    if v is None or (isinstance(v, str) and not v.strip()):
+        if blank_ok:
+            return None
+        raise Bad(f"{what} is required")
+    try:
+        d = D(str(v).strip())
+    except InvalidOperation:
+        raise Bad(f"{what} must be a whole number")
+    if d != d.to_integral_value() or not (lo <= d <= hi):
+        raise Bad(f"{what} must be a whole number between {lo:,} and {hi:,}")
+    return int(d)
 
 
 def prod_fields(d):
@@ -321,21 +354,120 @@ def prod_fields(d):
     return name, desc, price, cat
 
 
+# ---- inventory
+
+def adjust_stock(pid, change, reason, order_id=None):
+    """Move a product's stock and write the log line. Caller commits."""
+    if not change:
+        return
+    c = db()
+    c.execute("UPDATE products SET stock=stock+? WHERE id=?", (change, pid))
+    after = c.execute("SELECT stock FROM products WHERE id=?", (pid,)).fetchone()["stock"]
+    c.execute("INSERT INTO stock_log(product_id,change,stock_after,reason,order_id) VALUES(?,?,?,?,?)",
+              (pid, change, after, reason, order_id))
+
+
+def alert_to():
+    return os.environ.get("OT_SMTP_USER") or os.environ.get("OT_SMTP_FROM") or ""
+
+
+def low_check(pids):
+    """Work out which products have just reached their limit (alert due) and re-arm the ones that recovered."""
+    c, due = db(), []
+    for pid in set(pids):
+        r = c.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+        if not r:
+            continue
+        if is_low(r) and not r["low_alert_sent"]:
+            due.append(r)
+        elif not is_low(r) and r["low_alert_sent"]:
+            c.execute("UPDATE products SET low_alert_sent=0 WHERE id=?", (pid,))
+    c.commit()
+    return due
+
+
+def send_low_alerts(rows):
+    """Email one message listing the products that reached their limit. Returns an error text, or '' when sent."""
+    if not rows:
+        return ""
+    if not email_ready() or not alert_to():
+        return "Email is not set up"
+    lines = [f"{r['name']}: {r['stock']} left (alert at {r['low_threshold']})" for r in rows]
+    msg = EmailMessage()
+    msg["Subject"] = f"Low stock: {', '.join(r['name'] for r in rows)[:120]}"
+    msg["From"] = os.environ.get("OT_SMTP_FROM") or os.environ.get("OT_SMTP_USER") or "orders@localhost"
+    msg["To"] = alert_to()
+    msg.set_content(f"{BUSINESS_NAME} - these products are at or below their low-stock limit:\n\n" + "\n".join(lines)
+                    + "\n\nYou will not get another email for a product until it has been restocked above its limit.")
+    try:
+        send_mail(msg)
+    except (smtplib.SMTPException, OSError) as e:
+        return str(e)
+    db().executemany("UPDATE products SET low_alert_sent=1 WHERE id=?", [(r["id"],) for r in rows])
+    db().commit()
+    return ""
+
+
+def after_stock_change(pids):
+    """Call after the transaction is committed: sends any low-stock email that is now due."""
+    send_low_alerts(low_check(pids))
+
+
+def shortages(pids):
+    """Products (from this order) whose stock is below zero: what you still need to find."""
+    out = []
+    for pid in set(pids):
+        r = db().execute("SELECT name, stock FROM products WHERE id=?", (pid,)).fetchone()
+        if r and r["stock"] < 0:
+            out.append({"name": r["name"], "short": -r["stock"]})
+    return sorted(out, key=lambda x: x["name"].lower())
+
+
+def reserved(oid):
+    """What an order has taken out of stock right now: {product_id: qty}. Cancelled orders hold nothing."""
+    row = db().execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()
+    if not row or row["status"] == "Cancelled":
+        return {}
+    return {r["product_id"]: r["n"] for r in db().execute(
+        "SELECT product_id, SUM(qty) AS n FROM order_items WHERE order_id=? AND product_id IS NOT NULL GROUP BY product_id", (oid,))}
+
+
+def sync_stock(oid, before, reason):
+    """Compare what the order held before with what it holds now and move stock by the difference."""
+    after = reserved(oid)
+    changed = []
+    for pid in set(before) | set(after):
+        d = after.get(pid, 0) - before.get(pid, 0)
+        if d:
+            adjust_stock(pid, -d, f"Order #{oid} {reason}", oid)
+            changed.append(pid)
+    return after, changed
+
+
 @app.post("/api/products")
 def products_add():
-    f = prod_fields(body())
+    d = body()
+    f = prod_fields(d)
+    stock = whole(d.get("stock"), "Current inventory", lo=0, blank_ok=True) or 0
     cur = db().execute("INSERT INTO products(name,description,unit_price_c,category_id) VALUES(?,?,?,?)", f)
+    adjust_stock(cur.lastrowid, stock, "Starting stock")
     db().commit()
     return jsonify(id=cur.lastrowid), 201
 
 
 @app.put("/api/products/<int:pid>")
 def products_update(pid):
-    f = prod_fields(body())
-    cur = db().execute("UPDATE products SET name=?,description=?,unit_price_c=?,category_id=? WHERE id=?", (*f, pid))
-    if not cur.rowcount:
+    d = body()
+    f = prod_fields(d)
+    old = db().execute("SELECT stock FROM products WHERE id=?", (pid,)).fetchone()
+    if not old:
         raise Bad("Product not found", 404)
+    new = whole(d.get("stock"), "Current inventory", blank_ok=True)
+    db().execute("UPDATE products SET name=?,description=?,unit_price_c=?,category_id=? WHERE id=?", (*f, pid))
+    if new is not None and new != old["stock"]:
+        adjust_stock(pid, new - old["stock"], "Correction (edited the number)")
     db().commit()
+    after_stock_change([pid])
     return jsonify(ok=True)
 
 
@@ -346,6 +478,74 @@ def products_delete(pid):
         raise Bad("Product not found", 404)
     db().commit()
     return jsonify(ok=True)
+
+
+@app.post("/api/products/<int:pid>/stock")
+def products_add_stock(pid):
+    d = body()
+    n = whole(d.get("change"), "Quantity", lo=-100000, hi=100000)
+    if n == 0:
+        raise Bad("Enter a quantity other than zero")
+    if not db().execute("SELECT 1 FROM products WHERE id=?", (pid,)).fetchone():
+        raise Bad("Product not found", 404)
+    note = text(d.get("note"), "Note", 200)
+    reason = ("Restock" if n > 0 else "Correction") + (": " + note if note else "")
+    adjust_stock(pid, n, reason)
+    db().commit()
+    after_stock_change([pid])
+    return jsonify(stock=db().execute("SELECT stock FROM products WHERE id=?", (pid,)).fetchone()["stock"])
+
+
+@app.get("/api/products/<int:pid>/stock-log")
+def products_stock_log(pid):
+    p = db().execute("SELECT name, stock FROM products WHERE id=?", (pid,)).fetchone()
+    if not p:
+        raise Bad("Product not found", 404)
+    rows = db().execute("SELECT * FROM stock_log WHERE product_id=? ORDER BY id DESC LIMIT 300", (pid,)).fetchall()
+    return jsonify(name=p["name"], stock=p["stock"], log=[
+        {"when": r["created_at"], "change": r["change"], "after": r["stock_after"], "reason": r["reason"], "order_id": r["order_id"]} for r in rows])
+
+
+# ---- settings (low-stock limits)
+
+@app.get("/api/settings")
+def settings_get():
+    rows = db().execute("SELECT p.*, c.name AS category FROM products p LEFT JOIN categories c ON c.id=p.category_id ORDER BY p.name").fetchall()
+    return jsonify(alert_to=alert_to() if email_ready() else "", email_enabled=email_ready(), products=[prod_json(r) for r in rows])
+
+
+@app.put("/api/settings/thresholds")
+def settings_thresholds():
+    items = body().get("items")
+    if not isinstance(items, list):
+        raise Bad("Send a list of items")
+    ids = []
+    for it in items:
+        if not isinstance(it, dict) or not str(it.get("id", "")).isdigit():
+            raise Bad("Bad item")
+        t = whole(it.get("low_threshold"), "Alert level", lo=0, hi=1000000, blank_ok=True)
+        cur = db().execute("UPDATE products SET low_threshold=? WHERE id=?", (t, int(it["id"])))
+        if cur.rowcount:
+            ids.append(int(it["id"]))
+    db().commit()
+    after_stock_change(ids)
+    return jsonify(ok=True)
+
+
+@app.post("/api/settings/test-email")
+def settings_test_email():
+    if not email_ready() or not alert_to():
+        raise Bad("Email is not set up yet. Add the OT_SMTP_* settings (see README).")
+    msg = EmailMessage()
+    msg["Subject"] = f"Test from {BUSINESS_NAME} Order Tracker"
+    msg["From"] = os.environ.get("OT_SMTP_FROM") or os.environ.get("OT_SMTP_USER") or "orders@localhost"
+    msg["To"] = alert_to()
+    msg.set_content("Low-stock alerts will arrive at this address.")
+    try:
+        send_mail(msg)
+    except (smtplib.SMTPException, OSError) as e:
+        raise Bad(f"The email could not be sent: {e}", 502)
+    return jsonify(ok=True, to=alert_to())
 
 
 # ---------------------------------------------------------------- orders
@@ -480,9 +680,12 @@ def save_order(oid, d):
     else:
         done = None
     if oid is None:
+        before, reason = {}, "entered"
         oid = c.execute("INSERT INTO orders(customer_id,order_date,status,payment_method,amount_paid_c,completion_date,notes)"
                         " VALUES(?,?,?,?,?,?,?)", (cust, odate, status, method, paid, done, notes)).lastrowid
     else:
+        before = reserved(oid)
+        reason = "cancelled" if status == "Cancelled" else "edited"
         cur = c.execute("UPDATE orders SET customer_id=?,order_date=?,status=?,payment_method=?,amount_paid_c=?,"
                         "completion_date=?,notes=? WHERE id=?", (cust, odate, status, method, paid, done, notes, oid))
         if not cur.rowcount:
@@ -490,19 +693,22 @@ def save_order(oid, d):
         c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
     c.executemany("INSERT INTO order_items(order_id,product_id,product_name,description,qty,unit_price_c) VALUES(?,?,?,?,?,?)",
                   [(oid, *it) for it in items])
+    after, changed = sync_stock(oid, before, reason)      # same transaction: stock and order are saved together
     c.commit()
-    return oid
+    after_stock_change(changed)
+    return oid, shortages(after)
 
 
 @app.post("/api/orders")
 def orders_add():
-    return jsonify(id=save_order(None, body())), 201
+    oid, short = save_order(None, body())
+    return jsonify(id=oid, warnings=short), 201
 
 
 @app.put("/api/orders/<int:oid>")
 def orders_update(oid):
-    save_order(oid, body())
-    return jsonify(ok=True)
+    _, short = save_order(oid, body())
+    return jsonify(ok=True, warnings=short)
 
 
 @app.post("/api/orders/<int:oid>/status")
@@ -512,20 +718,26 @@ def orders_status(oid):
     if status not in STATUSES:
         raise Bad("Unknown status")
     done = iso_date(d.get("completion_date"), "Completion date", required=False) or date.today().isoformat()
+    before = reserved(oid)
     cur = db().execute("UPDATE orders SET status=?, completion_date=CASE WHEN ?='Completed' THEN COALESCE(completion_date,?) ELSE NULL END WHERE id=?",
                        (status, status, done, oid))
     if not cur.rowcount:
         raise Bad("Order not found", 404)
+    after, changed = sync_stock(oid, before, "cancelled" if status == "Cancelled" else "reinstated")
     db().commit()
-    return jsonify(ok=True)
+    after_stock_change(changed)
+    return jsonify(ok=True, warnings=shortages(after))
 
 
 @app.delete("/api/orders/<int:oid>")
 def orders_delete(oid):
+    before = reserved(oid)
     cur = db().execute("DELETE FROM orders WHERE id=?", (oid,))
     if not cur.rowcount:
         raise Bad("Order not found", 404)
+    _, changed = sync_stock(oid, before, "deleted")      # the order is gone, so everything it held goes back
     db().commit()
+    after_stock_change(changed)
     return jsonify(ok=True)
 
 
@@ -550,7 +762,9 @@ def stats():
                      "ordered": dollars(r["ordered"]), "paid": dollars(r["paid"]), "balance": dollars(r["ordered"] - r["paid"])})
     live = [r for s, r in by.items() if s != "Cancelled"]
     owed = sum(D(r["balance"]) for r in live)
-    return jsonify(by_status=[by[s] for s in STATUSES], customers=cust, outstanding=str(owed))
+    low = [{"id": r["id"], "name": r["name"], "stock": r["stock"], "threshold": r["low_threshold"]} for r in db().execute(
+        "SELECT id,name,stock,low_threshold FROM products WHERE low_threshold IS NOT NULL AND stock<=low_threshold ORDER BY stock, name")]
+    return jsonify(by_status=[by[s] for s in STATUSES], customers=cust, outstanding=str(owed), low_stock=low)
 
 
 # ---------------------------------------------------------------- quotes (print page + email)
