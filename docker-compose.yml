@@ -1,0 +1,36 @@
+# Works with `docker compose up -d` (or Unraid's Compose Manager plugin). To update: `docker compose pull && docker compose up -d`
+# The image is built by GitHub on every push (see .github/workflows), so nothing is built on the server.
+# Settings live in a file named `.env` next to this one (copy `.env.example`). Fixed project name:
+name: ordertracker
+
+services:
+  ordertracker:
+    image: ghcr.io/orcsbane1369/order-tracker:latest
+    container_name: ordertracker
+    restart: unless-stopped
+    user: "99:100"            # Unraid's nobody:users; owns the data folder
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/orcsbane1369/Order-Tracker/main/static/icon.png"
+      net.unraid.docker.webui: "http://[IP]:5007"
+    ports:
+      - "${OT_PORT:-5007}:5000"   # host port -> app. There is no login: never forward this port on your router.
+    environment:
+      OT_BUSINESS_NAME: "${OT_BUSINESS_NAME:-Our Creations}"
+      OT_BUSINESS_CONTACT: "${OT_BUSINESS_CONTACT:-}"
+      OT_QUOTE_NOTE: "${OT_QUOTE_NOTE:-}"
+      OT_SMTP_HOST: "${OT_SMTP_HOST:-}"
+      OT_SMTP_PORT: "${OT_SMTP_PORT:-587}"
+      OT_SMTP_SECURITY: "${OT_SMTP_SECURITY:-starttls}"
+      OT_SMTP_USER: "${OT_SMTP_USER:-}"
+      OT_SMTP_PASSWORD: "${OT_SMTP_PASSWORD:-}"
+      OT_SMTP_FROM: "${OT_SMTP_FROM:-}"
+      OT_SMTP_REPLY_TO: "${OT_SMTP_REPLY_TO:-}"
+    volumes:
+      - "${OT_DATA_DIR:-/mnt/user/appdata/ordertracker}:/data"   # the database

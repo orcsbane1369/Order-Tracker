@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block body %}
+<header class="topbar">
+  <h1>Order Tracker <span class="biz">{{ business }}</span></h1>
+</header>
+
+<main class="page">
+  <section class="cards" id="cards" aria-label="Orders by stage"></section>
+
+  <section class="toolbar">
+    <div class="group">
+      <button id="btnNew" class="primary">New Order</button>
+      <button id="btnEdit" disabled>Edit Order</button>
+      <label class="inline stage">Move to <select id="selStage" disabled aria-label="Move selected order to stage"></select></label>
+      <button id="btnEmail" disabled>Email Quote</button>
+      <button id="btnPrint" disabled>Print Quote</button>
+      <button id="btnDelete" class="danger" disabled>Delete Order</button>
+    </div>
+    <div class="group">
+      <button id="btnCust">Customers</button>
+      <button id="btnProd">Products</button>
+      <button id="btnStats">Order Stats</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="row">
+      <label class="narrow">Order # <input id="fNo" inputmode="numeric" placeholder="Any" autocomplete="off"></label>
+      <label>Customer <select id="fCust"><option value="">All customers</option></select></label>
+      <label>Stage <select id="fStatus"></select></label>
+      <label class="narrow">From <input id="fStart" type="date"></label>
+      <label class="narrow">To <input id="fEnd" type="date"></label>
+      <button id="btnClear">Clear Filters</button>
+      <span id="count" class="muted" role="status"></span>
+    </div>
+  </section>
+
+  <section class="tablewrap" id="tableWrap">
+    <table id="orderTable">
+      <thead><tr>
+        <th data-k="id" class="n">Order #</th><th data-k="customer_name">Customer</th><th data-k="order_date">Order Date</th>
+        <th data-k="total" class="n">Total</th><th data-k="amount_paid" class="n">Paid</th><th data-k="balance" class="n">Balance</th>
+        <th data-k="payment_method">Payment</th><th data-k="status">Stage</th><th data-k="completion_date">Completed</th>
+      </tr></thead>
+      <tbody id="orderBody"></tbody>
+    </table>
+    <p id="empty" class="empty" hidden>No orders match. Use <strong>New Order</strong> to add one.</p>
+  </section>
+</main>
+
+<!-- New / edit order -->
+<dialog id="orderDlg" class="wide" aria-labelledby="orderTitle">
+  <form id="orderForm" method="dialog">
+    <div class="dlg-head"><h2 id="orderTitle">New Order</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+    <div class="dlg-body col">
+      <fieldset>
+        <legend>Customer</legend>
+        <div class="grid2">
+          <label>Customer <select id="o_cust"></select></label>
+          <div></div>
+        </div>
+        <div id="newCust" class="grid2" hidden>
+          <label>Name <input id="nc_name" maxlength="80" autocomplete="off"></label>
+          <label>Contact number <input id="nc_phone" maxlength="40" inputmode="tel" placeholder="(555) 555-5555" autocomplete="off"></label>
+          <label>Email <input id="nc_email" type="email" maxlength="120" placeholder="john.doe@example.com" autocomplete="off"></label>
+          <label>Address <input id="nc_addr" maxlength="300" placeholder="Street, City, State, Zip" autocomplete="off"></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Order details</legend>
+        <div class="grid4">
+          <label>Order date <input id="o_date" type="date" required></label>
+          <label>Stage <select id="o_status"></select></label>
+          <label>Payment method <select id="o_method"></select></label>
+          <label>Amount paid ($) <input id="o_paid" type="number" step="0.01" min="0" value="0"></label>
+        </div>
+        <label>Notes <textarea id="o_notes" rows="2" maxlength="2000" placeholder="Anything to remember about this order"></textarea></label>
+      </fieldset>
+      <fieldset>
+        <legend>Items</legend>
+        <div class="scroll items">
+          <table class="mini" id="itemTable">
+            <thead><tr><th>Product</th><th>Customization / notes</th><th class="n">Qty</th><th class="n">Unit price</th><th class="n">Total</th><th></th></tr></thead>
+            <tbody id="itemBody"></tbody>
+          </table>
+        </div>
+        <div class="itemfoot">
+          <button type="button" id="btnAddItem">+ Add Item</button>
+          <div class="totals">
+            <span>Total <strong id="t_total">$0.00</strong></span>
+            <span>Paid <strong id="t_paid">$0.00</strong></span>
+            <span>Balance due <strong id="t_bal">$0.00</strong></span>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+    <div class="dlg-foot"><span id="orderErr" class="error" role="alert"></span><button type="button" data-close>Cancel</button><button class="primary" type="submit">Save Order</button></div>
+  </form>
+</dialog>
+
+<!-- Customers -->
+<dialog id="custDlg" aria-labelledby="custTitle">
+  <div class="dlg-head"><h2 id="custTitle">Manage Customers</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+  <div class="dlg-body col">
+    <div class="scroll pick" id="custList" role="listbox" aria-label="Customers"></div>
+    <div class="grid2">
+      <label>Name <input id="c_name" maxlength="80" autocomplete="off"></label>
+      <label>Contact <input id="c_phone" maxlength="40" inputmode="tel" placeholder="(555) 555-5555" autocomplete="off"></label>
+      <label class="span2">Email <input id="c_email" type="email" maxlength="120" placeholder="john.doe@example.com" autocomplete="off"></label>
+      <label class="span2">Address <textarea id="c_addr" rows="3" maxlength="300" placeholder="Street, City, State, Zip"></textarea></label>
+    </div>
+  </div>
+  <div class="dlg-foot"><span id="custErr" class="error" role="alert"></span>
+    <button id="cAdd" class="primary">Add New</button><button id="cUpd" disabled>Update Selected</button>
+    <button id="cClr">Clear Fields</button><button id="cDel" class="danger" disabled>Delete Selected</button><button data-close>Close</button></div>
+</dialog>
+
+<!-- Products + categories -->
+<dialog id="prodDlg" class="wide" aria-labelledby="prodTitle">
+  <div class="dlg-head"><h2 id="prodTitle">Manage Products</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tabP" aria-selected="true" class="tab">Products</button>
+    <button role="tab" id="tabC" aria-selected="false" class="tab">Categories</button>
+  </div>
+  <div id="paneP" class="dlg-body col">
+    <label class="inline">Filter by category <select id="p_filter"></select></label>
+    <div class="scroll pick" id="prodList" role="listbox" aria-label="Products"></div>
+    <div class="grid2">
+      <label>Product name <input id="p_name" maxlength="80" placeholder="e.g., 32oz Tumbler, T-Shirt" autocomplete="off"></label>
+      <label>Category <select id="p_cat"></select></label>
+      <label class="span2">Description <textarea id="p_desc" rows="2" maxlength="500" placeholder="Generic description (e.g., Stainless steel, double-walled)"></textarea></label>
+      <label>Unit price ($) <input id="p_price" type="number" step="0.01" min="0" placeholder="0.00"></label>
+    </div>
+    <div class="group">
+      <button id="pAdd" class="primary">Add New</button><button id="pUpd" disabled>Update Selected</button>
+      <button id="pDel" class="danger" disabled>Delete Selected</button><button id="pClr">Clear Fields</button>
+    </div>
+    <span id="prodErr" class="error" role="alert"></span>
+  </div>
+  <div id="paneC" class="dlg-body col" hidden>
+    <div class="scroll pick" id="catList" role="listbox" aria-label="Categories"></div>
+    <label>Category name <input id="k_name" maxlength="60" placeholder="e.g., Apparel, Drinkware" autocomplete="off"></label>
+    <div class="group">
+      <button id="kAdd" class="primary">Add New Category</button><button id="kUpd" disabled>Update Selected Category</button>
+      <button id="kDel" class="danger" disabled>Delete Selected Category</button><button id="kClr">Clear Fields</button>
+    </div>
+    <span id="catErr" class="error" role="alert"></span>
+  </div>
+  <div class="dlg-foot"><button data-close>Close</button></div>
+</dialog>
+
+<!-- Stats -->
+<dialog id="statsDlg" class="wide" aria-labelledby="statsTitle">
+  <div class="dlg-head"><h2 id="statsTitle">Customer Order Statistics</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+  <div class="dlg-body">
+    <p class="muted" id="statsOwed"></p>
+    <div class="scroll tall">
+      <table class="mini" id="statsTable">
+        <thead><tr><th>Customer</th><th class="n">Total orders</th><th class="n">Open</th><th class="n">Completed</th><th class="n">Ordered</th><th class="n">Paid</th><th class="n">Balance due</th></tr></thead>
+        <tbody id="statsBody"></tbody>
+      </table>
+    </div>
+    <p class="muted small">Cancelled orders are not counted in the dollar amounts. Open means New, Pending, Ready for Pickup or Shipped.</p>
+  </div>
+  <div class="dlg-foot"><button data-close>Close</button></div>
+</dialog>
+
+<!-- Email quote -->
+<dialog id="mailDlg" aria-labelledby="mailTitle">
+  <form id="mailForm" method="dialog">
+    <div class="dlg-head"><h2 id="mailTitle">Email Order Quote</h2><button type="button" class="ghost" data-close aria-label="Close">&#10005;</button></div>
+    <div class="dlg-body col">
+      <p id="mailInfo" class="muted"></p>
+      <label>Send to <input id="m_to" type="email" required maxlength="120" autocomplete="off"></label>
+      <label>Message (optional) <textarea id="m_msg" rows="4" maxlength="2000" placeholder="Hi! Here is your quote..."></textarea></label>
+    </div>
+    <div class="dlg-foot"><span id="mailErr" class="error" role="alert"></span><button type="button" data-close>Cancel</button><button class="primary" id="mailSend" type="submit">Send Quote</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='app.js') }}"></script>{% endblock %}

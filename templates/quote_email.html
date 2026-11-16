@@ -1,0 +1,23 @@
+<!doctype html>
+<html><body style="font-family:Arial,Helvetica,sans-serif;color:#14263a;font-size:15px;">
+{% if message %}<p style="white-space:pre-wrap;">{{ message }}</p>{% endif %}
+<h2 style="margin:0 0 4px;">{{ business }} &mdash; Quote for Order #{{ order['id'] }}</h2>
+<p style="margin:0 0 14px;color:#5b6b7b;">{{ order['order_date'] }} &middot; Prepared for {{ customer['name'] }}</p>
+<table style="border-collapse:collapse;width:100%;max-width:560px;">
+  <tr style="background:#14263a;color:#fff;"><th align="left" style="padding:6px 8px;">Item</th><th align="right" style="padding:6px 8px;">Qty</th><th align="right" style="padding:6px 8px;">Price</th><th align="right" style="padding:6px 8px;">Total</th></tr>
+  {% for i in items %}
+  <tr><td style="padding:6px 8px;border-bottom:1px solid #c3cdd8;"><strong>{{ i.name }}</strong>{% if i.description %}<br><span style="color:#5b6b7b;font-size:13px;">{{ i.description }}</span>{% endif %}</td>
+  <td align="right" style="padding:6px 8px;border-bottom:1px solid #c3cdd8;">{{ i.qty }}</td>
+  <td align="right" style="padding:6px 8px;border-bottom:1px solid #c3cdd8;">{{ i.unit }}</td>
+  <td align="right" style="padding:6px 8px;border-bottom:1px solid #c3cdd8;">{{ i.total }}</td></tr>
+  {% endfor %}
+  <tr><td colspan="3" align="right" style="padding:8px;"><strong>Total</strong></td><td align="right" style="padding:8px;"><strong>{{ total }}</strong></td></tr>
+  {% if order['amount_paid_c'] %}
+  <tr><td colspan="3" align="right" style="padding:4px 8px;">Paid</td><td align="right" style="padding:4px 8px;">{{ paid }}</td></tr>
+  <tr><td colspan="3" align="right" style="padding:4px 8px;"><strong>Balance due</strong></td><td align="right" style="padding:4px 8px;"><strong>{{ balance }}</strong></td></tr>
+  {% endif %}
+</table>
+{% if order['notes'] %}<p><strong>Notes</strong><br>{{ order['notes'] }}</p>{% endif %}
+{% if note %}<p style="color:#5b6b7b;">{{ note }}</p>{% endif %}
+{% if contact %}<p style="color:#5b6b7b;">{{ contact }}</p>{% endif %}
+</body></html>

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Quote - Order #{{ order['id'] }}{% endblock %}
+{% block bodyclass %}quote{% endblock %}
+{% block body %}
+<div class="noprint bar"><a class="btn" href="{{ url_for('index') }}">&larr; Back</a> <button id="printBtn" class="primary">Print</button></div>
+<article class="sheet">
+  <header class="qhead">
+    <div><h1>{{ business }}</h1>{% if contact %}<p class="muted">{{ contact }}</p>{% endif %}</div>
+    <div class="qmeta"><h2>QUOTE</h2><p>Order #{{ order['id'] }}<br>{{ order['order_date'] }}</p></div>
+  </header>
+  <section class="qto">
+    <strong>Prepared for</strong><br>{{ customer['name'] }}
+    {% if customer['address'] %}<br>{{ customer['address'] }}{% endif %}
+    {% if customer['phone'] %}<br>{{ customer['phone'] }}{% endif %}
+    {% if customer['email'] %}<br>{{ customer['email'] }}{% endif %}
+  </section>
+  <table class="qtable">
+    <thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead>
+    <tbody>
+    {% for i in items %}
+      <tr><td><strong>{{ i.name }}</strong>{% if i.description %}<div class="muted small">{{ i.description }}</div>{% endif %}</td>
+      <td class="n">{{ i.qty }}</td><td class="n">{{ i.unit }}</td><td class="n">{{ i.total }}</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="3" class="n">Total</td><td class="n"><strong>{{ total }}</strong></td></tr>
+      {% if order['amount_paid_c'] %}
+      <tr><td colspan="3" class="n">Paid</td><td class="n">{{ paid }}</td></tr>
+      <tr><td colspan="3" class="n">Balance due</td><td class="n"><strong>{{ balance }}</strong></td></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+  {% if order['notes'] %}<p><strong>Notes</strong><br>{{ order['notes'] }}</p>{% endif %}
+  {% if note %}<p class="muted">{{ note }}</p>{% endif %}
+</article>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='quote.js') }}"></script>{% endblock %}
